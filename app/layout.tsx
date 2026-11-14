@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
-import { Fredoka, Nunito } from "next/font/google";
+import { DM_Sans, Fredoka, Nunito } from "next/font/google";
 import "./globals.css";
+
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
+  subsets: ["latin"],
+  display: "swap",
+});
 
 const nunito = Nunito({
   variable: "--font-nunito",
@@ -26,7 +32,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${nunito.variable} ${fredoka.variable}`}>{children}</body>
+      <body className={`${dmSans.variable} ${nunito.variable} ${fredoka.variable}`}>{children}</body>
     </html>
   );
 }

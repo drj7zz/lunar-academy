@@ -4,11 +4,37 @@ export type LeaderboardEntry = {
   createdAt: string;
 };
 
+export type SpaceWeatherSummary = {
+  source: string;
+  period: { start: string | null; end: string | null };
+  count: number;
+  events: unknown[];
+};
+
 const LOCAL_LEADERBOARD_KEY = "lunar-academy-leaderboard-v1";
 
 export const isLiveWeatherReady = false;
 
-export async function fetchSpaceWeather(): Promise<unknown | null> {
+function isSpaceWeatherSummary(value: unknown): value is SpaceWeatherSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const period = record.period;
+  return (
+    typeof record.source === "string" &&
+    typeof record.count === "number" &&
+    Number.isSafeInteger(record.count) &&
+    record.count >= 0 &&
+    Array.isArray(record.events) &&
+    typeof period === "object" &&
+    period !== null &&
+    "start" in period &&
+    (typeof period.start === "string" || period.start === null) &&
+    "end" in period &&
+    (typeof period.end === "string" || period.end === null)
+  );
+}
+
+export async function fetchSpaceWeather(): Promise<SpaceWeatherSummary | null> {
   if (typeof window === "undefined") return null;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 3_000);
@@ -20,6 +46,7 @@ export async function fetchSpaceWeather(): Promise<unknown | null> {
     });
     if (!response.ok) throw new Error(`Space weather request failed: ${response.status}`);
     const payload: unknown = await response.json();
+    if (!isSpaceWeatherSummary(payload)) throw new Error("Space weather response was not valid.");
     return payload;
   } catch (error) {
     console.warn("Space weather is unavailable.", error);
