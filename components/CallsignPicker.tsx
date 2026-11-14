@@ -1,11 +1,4 @@
-const CALLSIGNS = [
-  "Cadet Nova",
-  "Astro Orion",
-  "Commander Luna",
-  "Ranger Cosmo",
-  "Pilot Vega",
-  "Scout Apollo",
-] as const;
+import { Rocket } from "lucide-react";
 
 type CallsignPickerProps = {
   selected: string;
@@ -17,22 +10,19 @@ export default function CallsignPicker({
   onSelect,
 }: CallsignPickerProps) {
   return (
-    <div className="callsign-grid" role="group" aria-label="Choose your callsign">
-      {CALLSIGNS.map((callsign, index) => (
-        <button
-          aria-pressed={selected === callsign}
-          className={`callsign-choice ${selected === callsign ? "is-selected" : ""}`}
-          key={callsign}
-          onClick={() => onSelect(callsign)}
-          type="button"
-        >
-          <span aria-hidden="true" className="callsign-avatar">
-            {["🌟", "🪐", "🌙", "🚀", "☄️", "🛰️"][index]}
-          </span>
-          {callsign}
-          {selected === callsign && <span className="choice-check" aria-hidden="true">✓</span>}
-        </button>
-      ))}
+    <div className="callsign-select-wrap">
+      <span aria-hidden="true" className="callsign-avatar"><Rocket size={20} /></span>
+      <input
+        aria-label="Enter your callsign"
+        autoComplete="nickname"
+        className="callsign-select"
+        maxLength={24}
+        onChange={(event) => onSelect(event.target.value)}
+        placeholder="Type your name or callsign"
+        required
+        type="text"
+        value={selected}
+      />
     </div>
   );
 }

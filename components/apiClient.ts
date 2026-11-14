@@ -4,14 +4,44 @@ export type LeaderboardEntry = {
   createdAt: string;
 };
 
+export type SpaceWeatherSummary = {
+  source: string;
+  period: { start: string | null; end: string | null };
+  count: number;
+  events: unknown[];
+  dataStatus: "LIVE_NASA_DONKI" | "CURATED_FALLBACK";
+  note: string;
+};
+
 const LOCAL_LEADERBOARD_KEY = "lunar-academy-leaderboard-v1";
 
 export const isLiveWeatherReady = false;
 
-export async function fetchSpaceWeather(): Promise<unknown | null> {
+function isSpaceWeatherSummary(value: unknown): value is SpaceWeatherSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const period = record.period;
+  return (
+    typeof record.source === "string" &&
+    typeof record.count === "number" &&
+    Number.isSafeInteger(record.count) &&
+    record.count >= 0 &&
+    Array.isArray(record.events) &&
+    (record.dataStatus === "LIVE_NASA_DONKI" || record.dataStatus === "CURATED_FALLBACK") &&
+    typeof record.note === "string" &&
+    typeof period === "object" &&
+    period !== null &&
+    "start" in period &&
+    (typeof period.start === "string" || period.start === null) &&
+    "end" in period &&
+    (typeof period.end === "string" || period.end === null)
+  );
+}
+
+export async function fetchSpaceWeather(): Promise<SpaceWeatherSummary | null> {
   if (typeof window === "undefined") return null;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 3_000);
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
 
   try {
     const response = await fetch("/api/space-weather", {
@@ -20,6 +50,7 @@ export async function fetchSpaceWeather(): Promise<unknown | null> {
     });
     if (!response.ok) throw new Error(`Space weather request failed: ${response.status}`);
     const payload: unknown = await response.json();
+    if (!isSpaceWeatherSummary(payload)) throw new Error("Space weather response was not valid.");
     return payload;
   } catch (error) {
     console.warn("Space weather is unavailable.", error);
@@ -61,6 +92,20 @@ function writeLocalLeaderboard(entries: LeaderboardEntry[]) {
   }
 }
 
+function mergeLeaderboardEntries(
+  ...groups: LeaderboardEntry[][]
+): LeaderboardEntry[] {
+  const unique = new Map<string, LeaderboardEntry>();
+
+  for (const entry of groups.flat()) {
+    unique.set(JSON.stringify([entry.callsign, entry.score, entry.createdAt]), entry);
+  }
+
+  return [...unique.values()]
+    .sort((a, b) => b.score - a.score || a.createdAt.localeCompare(b.createdAt))
+    .slice(0, 10);
+}
+
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   try {
     const response = await fetch("/api/leaderboard", { cache: "no-store" });
@@ -69,9 +114,10 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
     if (typeof payload !== "object" || payload === null || !("entries" in payload)) {
       throw new Error("Leaderboard response was not valid.");
     }
-    const entries = Array.isArray(payload.entries)
-      ? payload.entries.filter(isLeaderboardEntry).sort((a, b) => b.score - a.score).slice(0, 10)
+    const serverEntries = Array.isArray(payload.entries)
+      ? payload.entries.filter(isLeaderboardEntry)
       : [];
+    const entries = mergeLeaderboardEntries(serverEntries, readLocalLeaderboard());
     writeLocalLeaderboard(entries);
     return entries;
   } catch (error) {
