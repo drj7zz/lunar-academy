@@ -1,0 +1,11 @@
+{
+  "note": "Saved historical NASA DONKI data (October 2026). Live NASA data was unavailable.",
+  "stormActive": true,
+  "flares": [
+    { "classType": "M6.7", "peakTime": "2026-10-08T15:48Z" },
+    { "classType": "M6.4", "peakTime": "2026-10-10T15:10Z" },
+    { "classType": "M1.8", "peakTime": "2026-10-06T08:05Z" },
+    { "classType": "M1.6", "peakTime": "2026-10-19T09:03Z" },
+    { "classType": "M1.0", "peakTime": "2026-10-05T18:57Z" }
+  ]
+}
