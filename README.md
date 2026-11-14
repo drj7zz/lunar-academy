@@ -15,12 +15,13 @@ Developed by Team Binary Coders for junior astronaut assistants.
 | Cadet Mode and Engineer View with simulated telemetry | Implemented; telemetry is illustrative, not live sensor data |
 | Dust-storm countdown and Earth–Moon signal-delay interaction | Implemented as timed browser simulations |
 | Six-scene narrated story | Browser speech synthesis; can be skipped or navigated manually |
-| NASA DONKI Solar Flare endpoint | Implemented; launch page displays a seven-day event summary when available |
-| Leaderboard API and browser `localStorage` fallback | Prototype; server storage is in-memory and resets on restart |
-| Persistent leaderboard database, accounts, and deployment configuration | Not implemented |
+| NASA DONKI Solar Flare endpoint | Implemented; shows a 30-day summary with a labeled historical fallback |
+| Leaderboard API | MongoDB persistence when configured, with a server-memory fallback |
+| Browser leaderboard fallback | `localStorage` keeps scores available when requests fail or a custom callsign is not accepted by the server |
+| Accounts and deployment configuration | Not implemented; there is no player account system |
 | Live NASA values used by the game engine | Not implemented |
 
-The launch page requests the latest seven days of NASA DONKI solar-flare records and displays the event count and date range when available. This summary does not drive game events or meter values; the adventure remains a simulation. The NASA data attribution modal also lists Artemis/LRO, ECLSS/Veggie, and the Deep Space Network as educational references.
+The launch page requests 30 days of NASA DONKI solar-flare records. The server caches successful responses for ten minutes and returns clearly labeled historical data if NASA is unavailable. The summary does not drive game events or meter values; the adventure remains a simulation. The NASA data attribution modal also lists Artemis/LRO, ECLSS/Veggie, and the Deep Space Network as educational references.
 
 ## Run locally
 
@@ -33,13 +34,13 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Mission decisions and meter changes run in the browser. API requests provide the launch-page space-weather summary and the mission debrief leaderboard.
 
-To use a personal NASA API key, copy `.env.example` to `.env.local` and set `NASA_API_KEY`:
+For persistent leaderboard storage, copy `.env.example` to `.env.local` and set `MONGODB_URI` to your MongoDB connection string:
 
 ```dotenv
-NASA_API_KEY=your_nasa_api_key
+MONGODB_URI=your_mongodb_connection_string
 ```
 
-The key is read by the server-side route and is not included in browser code. If unset, the route uses NASA's shared `DEMO_KEY`, which is rate-limited.
+MongoDB is optional for local development. If `MONGODB_URI` is unset or the database is unavailable, the server uses an in-memory leaderboard that resets when the process restarts. The space-weather route uses NASA's CCMC DONKI endpoint and does not require `NASA_API_KEY`.
 
 ## Available scripts
 
@@ -67,6 +68,7 @@ Cadet Mode uses the labels **Strong**, **Okay**, **Low!**, and **Critical!** ins
 lunar-academy/
 ├── app/
 │   ├── api/
+│   │   ├── health/route.ts             # GET /api/health
 │   │   ├── leaderboard/route.ts       # GET/POST /api/leaderboard
 │   │   └── space-weather/route.ts     # GET /api/space-weather
 │   ├── globals.css                    # Tailwind import and visual theme
@@ -81,7 +83,13 @@ lunar-academy/
 │   ├── MoonBaseStage.tsx              # Hazard-reactive crater illustration
 │   └── StoryIntro.tsx                 # Six-scene narrated story introduction
 ├── lib/
-│   └── leaderboard.ts                  # In-memory leaderboard prototype
+│   ├── config.ts                       # Callsigns, limits, and database settings
+│   ├── leaderboard.ts                  # In-memory leaderboard fallback
+│   ├── mongodb.ts                      # Optional MongoDB connection
+│   ├── rateLimit.ts                    # In-memory submission rate limit
+│   └── spaceWeather.ts                 # DONKI fetch, cache, and fallback
+├── data/
+│   └── fallback-flares.json            # Labeled historical flare data
 ├── public/
 │   └── moon-base.svg                   # Static Moon-base illustration asset
 ├── .env.example
@@ -93,15 +101,16 @@ lunar-academy/
 
 ## API overview
 
-- `GET /api/space-weather` requests the last seven days of NASA DONKI Solar Flare (FLR) observations; the launch screen displays the event count and date range.
-- `GET /api/leaderboard` returns up to ten in-memory scores.
-- `POST /api/leaderboard` accepts a callsign and non-negative integer score.
+- `GET /api/health` returns the service status.
+- `GET /api/space-weather` requests 30 days of NASA DONKI Solar Flare (FLR) observations, caches the result for ten minutes, and returns labeled historical fallback data if the upstream request fails.
+- `GET /api/leaderboard` returns up to ten scores from MongoDB when configured, otherwise from the in-memory fallback.
+- `POST /api/leaderboard` accepts an approved callsign and a score from 0 to 1200, with a limit of ten submissions per minute per IP. The approved callsigns are configured in `lib/config.ts`.
 
-The leaderboard is not durable or shared across server instances. The browser client falls back to `localStorage` when leaderboard requests fail. See [technical.md](./technical.md) for request/response contracts, game rules, data flow, and operational limitations.
+The browser still allows a custom callsign; because the API only accepts its approved list, custom-name scores are kept in that browser's `localStorage` and merged into the displayed leaderboard. Server-memory scores are not durable or shared across instances. See [technical.md](./technical.md) for request/response contracts, game rules, data flow, and operational limitations.
 
 ## NASA data and attribution
 
-The space-weather endpoint uses the [NASA DONKI API](https://api.nasa.gov/). The in-game attribution dialog also acknowledges Artemis and LRO, ECLSS and Veggie, and the NASA Deep Space Network as educational references. Moon Trek and NASA POWER are not currently integrated. DONKI results are informational only and do not drive game events or system values.
+The space-weather endpoint uses NASA's [CCMC DONKI API](https://kauai.ccmc.gsfc.nasa.gov/DONKI/). If the live request fails, the response is explicitly labeled as historical fallback data. The in-game attribution dialog also acknowledges Artemis and LRO, ECLSS and Veggie, and the NASA Deep Space Network as educational references. Moon Trek and NASA POWER are not currently integrated. DONKI results are informational only and do not drive game events or system values.
 
 Any future NASA data integration should record its exact dataset, endpoint, attribution, update cadence, and whether values are live, cached, or simulated. Do not treat the current game meters, hazards, or Engineer View telemetry as NASA observations.
 

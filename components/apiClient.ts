@@ -9,6 +9,8 @@ export type SpaceWeatherSummary = {
   period: { start: string | null; end: string | null };
   count: number;
   events: unknown[];
+  dataStatus: "LIVE_NASA_DONKI" | "CURATED_FALLBACK";
+  note: string;
 };
 
 const LOCAL_LEADERBOARD_KEY = "lunar-academy-leaderboard-v1";
@@ -25,6 +27,8 @@ function isSpaceWeatherSummary(value: unknown): value is SpaceWeatherSummary {
     Number.isSafeInteger(record.count) &&
     record.count >= 0 &&
     Array.isArray(record.events) &&
+    (record.dataStatus === "LIVE_NASA_DONKI" || record.dataStatus === "CURATED_FALLBACK") &&
+    typeof record.note === "string" &&
     typeof period === "object" &&
     period !== null &&
     "start" in period &&
@@ -37,7 +41,7 @@ function isSpaceWeatherSummary(value: unknown): value is SpaceWeatherSummary {
 export async function fetchSpaceWeather(): Promise<SpaceWeatherSummary | null> {
   if (typeof window === "undefined") return null;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 3_000);
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
 
   try {
     const response = await fetch("/api/space-weather", {
@@ -88,6 +92,20 @@ function writeLocalLeaderboard(entries: LeaderboardEntry[]) {
   }
 }
 
+function mergeLeaderboardEntries(
+  ...groups: LeaderboardEntry[][]
+): LeaderboardEntry[] {
+  const unique = new Map<string, LeaderboardEntry>();
+
+  for (const entry of groups.flat()) {
+    unique.set(JSON.stringify([entry.callsign, entry.score, entry.createdAt]), entry);
+  }
+
+  return [...unique.values()]
+    .sort((a, b) => b.score - a.score || a.createdAt.localeCompare(b.createdAt))
+    .slice(0, 10);
+}
+
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   try {
     const response = await fetch("/api/leaderboard", { cache: "no-store" });
@@ -96,9 +114,10 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
     if (typeof payload !== "object" || payload === null || !("entries" in payload)) {
       throw new Error("Leaderboard response was not valid.");
     }
-    const entries = Array.isArray(payload.entries)
-      ? payload.entries.filter(isLeaderboardEntry).sort((a, b) => b.score - a.score).slice(0, 10)
+    const serverEntries = Array.isArray(payload.entries)
+      ? payload.entries.filter(isLeaderboardEntry)
       : [];
+    const entries = mergeLeaderboardEntries(serverEntries, readLocalLeaderboard());
     writeLocalLeaderboard(entries);
     return entries;
   } catch (error) {

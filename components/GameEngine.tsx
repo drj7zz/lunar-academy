@@ -651,11 +651,18 @@ export default function GameEngine() {
                   <span>Fetching recent solar-flare observations…</span>
                 ) : spaceWeather ? (
                   <span>
-                    {spaceWeather.count} solar-flare {spaceWeather.count === 1 ? "report" : "reports"} from{" "}
-                    <a href="https://kauai.ccmc.gsfc.nasa.gov/DONKI/" rel="noreferrer" target="_blank">
-                      NASA DONKI
-                    </a>
-                    {" · "}{spaceWeather.period.start} to {spaceWeather.period.end}. Game events remain simulated.
+                    {spaceWeather.dataStatus === "LIVE_NASA_DONKI" ? (
+                      <>
+                        {spaceWeather.count} solar-flare {spaceWeather.count === 1 ? "report" : "reports"} from{" "}
+                        <a href="https://kauai.ccmc.gsfc.nasa.gov/DONKI/" rel="noreferrer" target="_blank">
+                          NASA DONKI
+                        </a>
+                        {" · "}{spaceWeather.period.start} to {spaceWeather.period.end}.
+                      </>
+                    ) : (
+                      spaceWeather.note
+                    )}{" "}
+                    Game events remain simulated.
                   </span>
                 ) : (
                   <span>NASA’s live feed is unavailable right now. The mission is still ready to launch.</span>

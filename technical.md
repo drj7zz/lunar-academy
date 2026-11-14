@@ -12,18 +12,18 @@ This document describes the current implementation and its integration boundarie
 | Browser game | `components/GameEngine.tsx` | Owns mission state, decision resolution, timers, transitions, score, and debrief UI using React state/hooks. |
 | UI components | `components/CallsignPicker.tsx`, `components/MeterCard.tsx`, `components/MoonBaseStage.tsx`, `components/StoryIntro.tsx` | Custom player callsign, resource bars, telemetry, interactive lunar scene, and six-scene narrated intro. |
 | Browser API client | `components/apiClient.ts` | Validated space-weather fetch helper, leaderboard API calls, and local leaderboard fallback. |
-| Space-weather route | `app/api/space-weather/route.ts` | Server-side proxy to NASA DONKI FLR. |
-| Leaderboard route/store | `app/api/leaderboard/route.ts`, `lib/leaderboard.ts` | Prototype GET/POST API and process-local score array. |
+| Space-weather route | `app/api/space-weather/route.ts`, `lib/spaceWeather.ts` | 30-day DONKI request, process-local cache, and labeled historical fallback. |
+| Leaderboard route/store | `app/api/leaderboard/route.ts`, `lib/leaderboard.ts`, `lib/mongodb.ts` | MongoDB-backed GET/POST API with process-memory fallback and submission rate limiting. |
 
 ### Runtime boundaries
 
 - Mission decisions and meter updates run in the browser. The game does not wait for an API call to advance a day.
-- The launch screen shows an informational seven-day NASA DONKI event summary when the service is available. These observations do not affect mission simulation.
+- The launch screen shows an informational 30-day NASA DONKI summary or clearly labeled historical fallback data. These observations do not affect mission simulation.
 - The six story scenes use browser Web Speech API narration when available. Narration advances to the next scene when playback ends; manual navigation and skip remain available, including when speech synthesis is unavailable.
 - The simulated countdowns use browser timers. They are gameplay pacing devices, not physical communications or hazard forecasts.
 - The leaderboard and space-weather integrations are outside the core game loop.
 - The static Moon-base SVG in `public/` is available as an asset; the game stage currently draws its scene inline in `MoonBaseStage.tsx`.
-- No `/data` directory or persistent database is currently configured.
+- `data/fallback-flares.json` supplies historical fallback observations. MongoDB persistence is optional and is enabled with `MONGODB_URI`.
 
 ## 2. Game state and mission flow
 
@@ -115,13 +115,13 @@ The score and callsign are submitted once when entering a result screen. There i
 
 ## 3. API contracts
 
-All endpoints are same-origin Next.js Route Handlers. They are publicly reachable and currently have no authentication, authorization, or rate limiting.
+All endpoints are same-origin Next.js Route Handlers. They are publicly reachable without authentication. Leaderboard submissions have an in-process rate limit.
 
 ### `GET /api/space-weather`
 
-**Upstream:** `https://api.nasa.gov/DONKI/FLR`
+**Upstream:** NASA CCMC DONKI Solar Flare endpoint at `https://ccmc.gsfc.nasa.gov/DONKI-API/get/FLR`.
 
-Requests the current UTC date and the date seven days earlier, using `NASA_API_KEY` or `DEMO_KEY`. The request uses `cache: "no-store"` and a 10-second timeout. The response exposes the DONKI event objects without reshaping their provider-specific fields.
+Requests the current UTC date and the date 30 days earlier. No API key is used. The upstream request uses `cache: "no-store"` and a 10-second timeout; successful results are cached in process memory for ten minutes. If the upstream request fails, the route returns bundled historical observations and identifies them as fallback data.
 
 **Success — HTTP 200**
 
@@ -130,13 +130,18 @@ Requests the current UTC date and the date seven days earlier, using `NASA_API_K
   "source": "NASA DONKI Solar Flare (FLR)",
   "period": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" },
   "count": 0,
-  "events": []
+  "events": [],
+  "dataStatus": "LIVE_NASA_DONKI",
+  "flareClass": "M2.1",
+  "stormActive": false,
+  "note": "Live solar flare data from NASA DONKI (last 30 days).",
+  "flares": [{ "classType": "M2.1", "peakTime": "YYYY-MM-DDTHH:mm:ssZ" }]
 }
 ```
 
-The sample above illustrates the response shape only; the route returns NASA’s actual event array. Network errors, non-success provider responses, invalid JSON, or a non-array response return HTTP 502 with `{ "error": "..." }`.
+The live response includes the upstream event array plus a small game-facing flare summary. When live data is unavailable, the route still returns HTTP 200 with the same shape, `dataStatus: "CURATED_FALLBACK"`, and a note identifying the historical data. `stormActive` is a simplified educational cue, not a radiation measurement or forecast. The browser validates the shared response fields and allows 12 seconds for the server request; the launch panel distinguishes live results from fallback data. `isLiveWeatherReady = false` keeps space-weather observations out of the game engine.
 
-The launch screen calls `fetchSpaceWeather()` in `components/apiClient.ts`, which applies a 3-second browser timeout and validates the response shape. It displays the recent event count and date range, or an explicit unavailable message. NASA observations are not used to drive game events or meter values; the adventure remains simulated. `isLiveWeatherReady = false` keeps live observations out of the game engine.
+The launch screen calls `fetchSpaceWeather()` in `components/apiClient.ts`. If the route itself cannot be reached or its response is invalid, the client logs the error and displays an unavailable message. NASA observations are not used to drive game events or meter values; the adventure remains simulated.
 
 ### `GET /api/leaderboard`
 
@@ -146,11 +151,12 @@ The launch screen calls `fetchSpaceWeather()` in `components/apiClient.ts`, whic
 {
   "entries": [
     { "callsign": "Cadet Nova", "score": 950, "createdAt": "2026-11-14T12:00:00.000Z" }
-  ]
+  ],
+  "storage": "database"
 }
 ```
 
-Returns at most ten entries sorted by descending score; ties are ordered by earlier creation time. An empty store returns `{ "entries": [] }`.
+Returns at most ten entries sorted by descending score; ties are ordered by earlier creation time. The response identifies the backing store as `"database"` or `"memory"`. If MongoDB is unset or unavailable, the route logs the database failure and returns the process-local memory store.
 
 ### `POST /api/leaderboard`
 
@@ -160,7 +166,7 @@ Returns at most ten entries sorted by descending score; ties are ordered by earl
 { "callsign": "Cadet Nova", "score": 950 }
 ```
 
-`callsign` is trimmed and must contain 1–24 characters. `score` must be a non-negative safe integer.
+`callsign` must exactly match a trimmed entry in `ALLOWED_CALLSIGNS` in `lib/config.ts` (`Cadet Nova`, `Astro Orion`, `Commander Luna`, `Ranger Cosmo`, `Pilot Vega`, or `Scout Apollo`). `score` must be a safe integer from 0 through `MAX_SCORE` (1200). The API allows ten submissions per minute per IP, tracked in process memory.
 
 **Success — HTTP 201**
 
@@ -170,25 +176,30 @@ Returns at most ten entries sorted by descending score; ties are ordered by earl
     "callsign": "Cadet Nova",
     "score": 950,
     "createdAt": "2026-11-14T12:00:00.000Z"
-  }
+  },
+  "storage": "database"
 }
 ```
 
-Invalid JSON or invalid fields return HTTP 400 with `{ "error": "..." }`.
+Invalid JSON or fields return HTTP 400; rate-limited submissions return HTTP 429. If MongoDB is unavailable after validation, the route inserts the score into the process-memory fallback and returns HTTP 201 with `"storage": "memory"`.
 
 ### Leaderboard persistence and client fallback
 
-`lib/leaderboard.ts` stores entries in a module-level array and returns the top ten. This is suitable only for local prototyping: data is lost on server restart, may differ between server workers/instances, and is not a durable shared leaderboard.
+When `MONGODB_URI` is configured and reachable, the API stores scores in the `lunar_academy.scores` collection. Without it, or if a database operation fails, `lib/leaderboard.ts` stores entries in a module-level array. Memory data is lost on server restart and may differ between server workers/instances.
 
-On either result screen, the client calls `POST /api/leaderboard` and then `GET /api/leaderboard`. If either call fails or returns a non-success status (including 404), `components/apiClient.ts` reads/writes the browser key `lunar-academy-leaderboard-v1` in `localStorage`. Browser storage may be unavailable or cleared by the user; storage failures are logged and do not interrupt the game.
+On either result screen, the client calls `POST /api/leaderboard` and then `GET /api/leaderboard`. The UI accepts custom callsigns, but the API allowlist does not; a rejected submission is retained in the browser key `lunar-academy-leaderboard-v1` and merged into displayed server results. Request failures also use this local fallback. Browser storage may be unavailable or cleared by the user; storage failures are logged and do not interrupt the game.
 
-**Before production:** replace the in-memory store with a persistent database, add server-side input/rate controls and abuse prevention, define tie/duplicate-score policy, and decide whether local fallback scores should be merged with server scores.
+**Before production:** configure MongoDB, move rate limiting to shared storage for multi-instance deployments, define tie/duplicate-score policy, and decide whether to align the UI callsign picker with the server allowlist.
+
+### `GET /api/health`
+
+Returns `{ "status": "OK" }` with HTTP 200.
 
 ## 4. NASA data, simulation, and attribution
 
 | Source | Current use |
 | --- | --- |
-| NASA DONKI Solar Flare (FLR) | Seven-day event count/date range displayed on the launch page; not consumed by game logic |
+| NASA DONKI Solar Flare (FLR) | 30-day event count/date range or labeled historical fallback shown on the launch page; not consumed by game logic |
 | Artemis / Lunar Reconnaissance Orbiter (LRO) | Cited in the attribution modal as lunar-exploration context; no runtime integration |
 | ECLSS / Veggie | Educational references in UI text; not live life-support data |
 | NASA Deep Space Network | Inspiration for the 3-second browser comms animation; no DSN request |
@@ -202,18 +213,18 @@ Any integration should document the exact dataset and fields used, provider URL,
 
 ```bash
 npm install
+# Optional: copy .env.example to .env.local and set MONGODB_URI for persistent scores.
 npm run dev
 npm run typecheck
 npm run build
-npm audit
 ```
 
 The game currently has no dedicated automated gameplay test suite. Type checking and a production build validate the application structure and types; manual browser checks are still needed for the full interactive mission and timer scenarios.
 
 ## 6. Production-readiness gaps
 
-- Persist leaderboard data in a database and introduce an abuse-resistant score submission policy.
-- Configure deployment secrets, monitoring, and rate limits for the public NASA proxy.
+- Configure MongoDB for durable leaderboard data; replace process-local rate limiting for multi-instance deployments.
+- Configure deployment monitoring for the public NASA proxy.
 - Decide which live NASA observations should affect gameplay, and validate their interpretation with authoritative sources.
 - Add automated tests for choice effects, depletion/evacuation, Day 4 timeout, and API fallback behavior.
 - Review accessibility with keyboard-only and screen-reader testing, including modal focus handling and reduced-motion behavior.
