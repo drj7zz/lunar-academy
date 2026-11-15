@@ -1,6 +1,6 @@
 # Lunar Academy
 
-Lunar Academy is a browser-based Moon-base survival game hello hello for young explorers ages 7–12. Across a seven-day mission at Shackleton Crater, players make decisions about power, life support, shielding, food, and crew warmth while learning a little real lunar science along the way.
+Lunar Academy is a browser-based Moon-base survival game for young explorers ages 7–12. Across a seven-day mission at Shackleton Crater, players make decisions about power, life support, shielding, food, and crew warmth while learning a little real lunar science along the way.
 
 The project is being developed for the 2026 NASA Space Apps Challenge. The game is an educational simulation—not mission operations software—and NASA does not endorse it.
 
